@@ -1,118 +1,117 @@
 #!/bin/sh
+# toggle_telemetry.sh - Enable or disable telemetry, and keep cp_upload in sync
 
-# Define file paths for telemetry files
-readonly WEB_SERVER_FILE=/usr/bin/web-server
-readonly WEBRTC_FILE=/usr/bin/webrtc
-readonly MONITOR_FILE=/usr/bin/Monitor
+# --- Telemetry files ---
+readonly WEB_SERVER="/usr/bin/web-server"
+readonly WEB_SERVER_DISABLED="/usr/bin/web-server.disabled"
 
-# Function to check the status of telemetry files
+readonly WEBRTC="/usr/bin/webrtc"
+readonly WEBRTC_DISABLED="/usr/bin/webrtc.disabled"
+
+readonly MONITOR="/usr/bin/Monitor"
+readonly MONITOR_DISABLED="/usr/bin/Monitor.disabled"
+
+# --- cp_upload manager ---
+readonly CP_UPLOAD_MANAGER="/mnt/UDISK/hi-manager/extras/cp_upload_manager.sh"
+
+# --- Helpers ---
+
 check_telemetry_status() {
-  # Check if all three files are disabled
-  if [ -f "${WEB_SERVER_FILE}.disabled" ] && [ -f "${WEBRTC_FILE}.disabled" ] && [ -f "${MONITOR_FILE}.disabled" ] &&
-       [ ! -f "${WEB_SERVER_FILE}" ] && [ ! -f "${WEBRTC_FILE}" ] && [ ! -f "${MONITOR_FILE}" ]; then
-    echo "disabled"
-  # Check if all three files are enabled
-  elif [ -f "${WEB_SERVER_FILE}" ] && [ -f "${WEBRTC_FILE}" ] && [ -f "${MONITOR_FILE}" ] &&
-     [ ! -f "${WEB_SERVER_FILE}.disabled" ] && [ ! -f "${WEBRTC_FILE}.disabled" ] && [ ! -f "${MONITOR_FILE}.disabled" ]; then
-    echo "enabled"
-  # If neither of the above conditions is true, return an error code
-  else
-    echo "mixed"  # Indicates mixed state
-  fi
+    if [ -x "$WEB_SERVER" ] && [ -x "$WEBRTC" ] && [ -x "$MONITOR" ]; then
+        echo "enabled"
+    elif [ -x "$WEB_SERVER_DISABLED" ] && [ -x "$WEBRTC_DISABLED" ] && [ -x "$MONITOR_DISABLED" ]; then
+        echo "disabled"
+    else
+        echo "mixed"
+    fi
 }
 
-# Function to display a warning message before disabling telemetry
-disable_warning() {
-  echo "Warning: Disabling telemetry will prevent the printer"
-  echo "         from working with Creality Print and Creality Cloud."
-}
-
-# Function to enable telemetry
 enable_telemetry() {
-  # Rename disabled files to enable telemetry
-  mv "${WEB_SERVER_FILE}.disabled" "${WEB_SERVER_FILE}" 2>/dev/null
-  mv "${WEBRTC_FILE}.disabled" "${WEBRTC_FILE}" 2>/dev/null
-  mv "${MONITOR_FILE}.disabled" "${MONITOR_FILE}" 2>/dev/null
+    echo "Enabling telemetry..."
+    mv "$WEB_SERVER_DISABLED" "$WEB_SERVER" 2>/dev/null
+    mv "$WEBRTC_DISABLED" "$WEBRTC" 2>/dev/null
+    mv "$MONITOR_DISABLED" "$MONITOR" 2>/dev/null
 
-  echo "Telemetry enabled."
+    # Delegate to cp_upload manager
+    [ -x "$CP_UPLOAD_MANAGER" ] && "$CP_UPLOAD_MANAGER" enable
 }
 
-# Function to disable telemetry
 disable_telemetry() {
-  # Rename enabled files to disable telemetry
-  mv "${WEB_SERVER_FILE}" "${WEB_SERVER_FILE}.disabled" 2>/dev/null
-  mv "${WEBRTC_FILE}" "${WEBRTC_FILE}.disabled" 2>/dev/null
-  mv "${MONITOR_FILE}" "${MONITOR_FILE}.disabled" 2>/dev/null
+    echo "Disabling telemetry..."
+    mv "$WEB_SERVER" "$WEB_SERVER_DISABLED" 2>/dev/null
+    mv "$WEBRTC" "$WEBRTC_DISABLED" 2>/dev/null
+    mv "$MONITOR" "$MONITOR_DISABLED" 2>/dev/null
 
-  # Kill any running telemetry processes
-  killall -q Monitor
-  killall -q web-server
-  killall -q webrtc
-
-  echo "Telemetry disabled."
+    # Delegate to cp_upload manager
+    [ -x "$CP_UPLOAD_MANAGER" ] && "$CP_UPLOAD_MANAGER" disable
 }
 
-# Check the status of telemetry files
-TELEMETRY_STATUS=$(check_telemetry_status)
+# --- Main ---
+case "$1" in
+    status)
+        state=$(check_telemetry_status)
+        echo "Telemetry: $state"
+        if [ -x "$CP_UPLOAD_MANAGER" ]; then
+            "$CP_UPLOAD_MANAGER" status
+        else
+            echo "cp_upload: not installed"
+        fi
+        exit 0
+        ;;
+esac
 
-# Check if the check_telemetry_status function returned an unexpected value
-if [ $? -ne 0 ] && [ $? -ne 1 ] && [ $? -ne 2 ]; then
-  echo "Error: Unexpected return value from check_telemetry_status function."
-  exit 1
-fi
+state=$(check_telemetry_status)
 
-# Handle different telemetry states
-if [ "$TELEMETRY_STATUS" == "disabled" ]; then
-  # All three files are disabled
-  echo "Telemetry is currently disabled."
-  read -n 1 -p "Do you want to enable telemetry? (y/n): "
-  echo
-
-  case $REPLY in
-    [Yy]*)
-      enable_telemetry
-      ;;
-    *)
-      echo "Exiting. No changes made."
-      exit 0
-      ;;
-  esac
-elif [ "$TELEMETRY_STATUS" == "enabled" ]; then
-  # All three files are enabled
-  echo "Telemetry is currently enabled."
-  disable_warning
-  read -n 1 -p "Do you want to disable telemetry? (y/n): "
-  echo
-
-  case $REPLY in
-    [Yy]*)
-      disable_telemetry
-      ;;
-    *)
-      echo "Exiting. No changes made."
-      exit 0
-      ;;
-  esac
-else
-  # Not all three files are in the same state
-  echo "Telemetry files are in an mixed state (some disabled, some enabled)."
-  disable_warning
-  read -n 1 -p "Do you want to enable or disable all telemetry files? (e/d): "
-  echo
-
-  case $REPLY in
-    [Ee]*)
-      enable_telemetry
-      ;;
-    [Dd]*)
-      disable_telemetry
-      ;;
-    *)
-      echo "Invalid choice. Exiting."
-      exit 0
-      ;;
-  esac
-fi
+case "$state" in
+    enabled)
+        echo "✅ Telemetry is currently ENABLED."
+        echo "❌ If you disable it, Creality will stop collecting usage data."
+        echo "⚠️ Creality Print will also NO LONGER be able to detect this printer"
+        echo "on the LAN nor communicate with it for uploads, control, settings, etc."
+        echo
+        echo "ℹ️ You will still be able to use Fluidd, Moonraker or other slicers such as OrcaSlicer."
+        echo
+        read -p "Do you want to disable it? [y/n] " -n 1
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            disable_telemetry
+        else
+            echo "Telemetry remains enabled."
+            exit 0
+        fi
+        ;;
+    disabled)
+        echo "❌ Telemetry is currently DISABLED."
+        echo "⚠️ If you enable it, Creality will start collecting usage data."
+        echo "✅ Creality Print will also be able to detect this printer on the"
+        echo "LAN and communicate with it for uploads, control, settings, etc."
+        echo
+        echo "ℹ️ You will still be able to use Fluidd, Moonraker or other slicers such as OrcaSlicer."
+        echo
+        read -p "Do you want to enable it? [y/n] " -n 1
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            enable_telemetry
+        else
+            echo "Telemetry remains disabled."
+            exit 0
+        fi
+        ;;
+    mixed)
+        echo "⚠️ Telemetry is in a MIXED state (some components enabled, some disabled)."
+        echo "Please choose:"
+        echo "  [E]nable telemetry"
+        echo "  [D]isable telemetry"
+        echo "  [I]gnore (leave unchanged)"
+        read -p "Your choice [E/D/I]: " -n 1
+        echo
+        case "$REPLY" in
+            [Ee]) enable_telemetry ;;
+            [Dd]) disable_telemetry ;;
+            *)    echo "Leaving telemetry unchanged." ;;
+        esac
+        ;;
+esac
 
 # Remind the user that telemetry changes will take effect only after a reboot
 echo "Remember, telemetry changes will take effect only after a reboot."

@@ -48,8 +48,11 @@ def fetch_json(url):
 def download_file(file_item):
     path = file_item["path"]
 
-    # Skip the script itself and .gitattributes
-    if os.path.basename(path) in (os.path.basename(__file__), ".gitattributes"):
+    # Skip the script itself, .gitattributes and readme.md
+    basename = os.path.basename(path).lower()
+    downloader = os.path.basename(__file__).lower()
+    
+    if basename in (downloader, ".gitattributes", "readme.md"):
         return True, f"Skipped {path}"
 
     blob_url = file_item["url"]

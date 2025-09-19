@@ -145,6 +145,15 @@ wait_for_moonraker() {
     done
 }
 
+install_cp_upload_service() {
+    if [ -x "/mnt/UDISK/hi-manager/extras/cp_upload_manager.sh" ]; then
+        echo "Installing cp_upload service..."
+        /mnt/UDISK/hi-manager/extras/cp_upload_manager.sh install
+    else
+        echo "Warning: cp_upload_manager.sh not found, skipping cp_upload installation"
+    fi
+}
+
 install_virtualenv
 remove_legacy_symlinks
 fetch_moonraker
@@ -154,3 +163,8 @@ install_wrapper_scripts
 modify_moonraker_asvc
 replace_moonraker
 wait_for_moonraker
+install_cp_upload_service
+
+# === finalizing ===
+progress "Moonraker installation complete!"
+echo

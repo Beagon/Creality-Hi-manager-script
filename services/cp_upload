@@ -1,0 +1,139 @@
+#!/bin/sh /etc/rc.common
+
+### CP_UPLOAD MANAGER SCRIPT ###
+# 
+# Provides: cp_upload
+# Requires: python3, entware
+# Short-Description: cp_upload shim service
+# Description: Manages installation, enabling, disabling, and 
+#              status of cp_upload service on Creality Hi devices.
+#
+### END INIT INFO ###
+
+START=95
+STOP=05
+EXTRA_COMMANDS="status"
+EXTRA_HELP="status: show runtime and boot status"
+
+PYTHON="$(command -v python3 2>/dev/null || echo /usr/bin/python3)"
+SHIM=/mnt/UDISK/cp_upload_shim.pyc
+PIDFILE=/var/run/cp_upload.pid
+PORT=8090
+
+start() {
+    echo "Starting cp_upload shim..."
+
+    if [ ! -f "$SHIM" ]; then
+        echo "Error: $SHIM not found. Cannot start."
+        return 1
+    fi
+
+    # Check if port is already in use
+    if netstat -tlnp 2>/dev/null | grep -q ":$PORT "; then
+        echo "Port $PORT already in use — attempting force_stop..."
+        force_stop
+        sleep 1
+    fi
+
+    # Handle stale PID file
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "Already running (PID $PID)"
+            return 1
+        else
+            echo "Removing stale pidfile."
+            rm -f "$PIDFILE"
+        fi
+    fi
+
+    # Run silently in background
+    # "$PYTHON" -u "$SHIM"  > /var/log/cp_upload.log 2>&1 &
+    "$PYTHON" -u "$SHIM" >/dev/null 2>&1 &
+    echo $! > "$PIDFILE"
+    echo "Started with PID $(cat "$PIDFILE")"
+}
+
+stop() {
+    echo "Stopping cp_upload shim..."
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE")
+
+        # Verify PID belongs to shim on expected port
+        if netstat -tlnp 2>/dev/null | grep -q ":$PORT .*${PID}/"; then
+            kill "$PID" 2>/dev/null
+            rm -f "$PIDFILE"
+            echo "Stopped (PID $PID)."
+            return 0
+        else
+            echo "PID file exists but process not bound to port $PORT — cleaning up."
+            rm -f "$PIDFILE"
+            return 1
+        fi
+    else
+        echo "Not running"
+        return 1
+    fi
+}
+
+force_stop() {
+    echo "Force stopping any process on port $PORT..."
+    PIDS=$(netstat -tlnp 2>/dev/null | awk -v port=":$PORT" '$4 ~ port {print $7}' | cut -d/ -f1)
+
+    if [ -n "$PIDS" ]; then
+        for PID in $PIDS; do
+            kill "$PID" 2>/dev/null && echo "Killed process $PID using port $PORT"
+        done
+        rm -f "$PIDFILE"
+        return 0
+    else
+        echo "No process found on port $PORT"
+        return 1
+    fi
+}
+
+restart() {
+    stop
+    if [ $? -ne 0 ]; then
+        echo "Stop failed — attempting force_stop..."
+        force_stop
+    fi
+    sleep 1
+    start
+}
+
+status() {
+    # --- Boot-time status ---
+    boot_status="disabled"
+    boot_source="none"
+
+    # Check OpenWrt rc.d symlinks
+    if /etc/init.d/cp_upload enabled >/dev/null 2>&1; then
+        boot_status="enabled"
+        boot_source="/etc/rc.d"
+    fi
+
+    # Check Entware/unslung symlinks
+    if [ -L /opt/etc/init.d/S95cp_upload ]; then
+        boot_status="enabled"
+        boot_source="/opt/etc/init.d"
+    fi
+
+    # --- Runtime status ---
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            if netstat -tlnp 2>/dev/null | grep -q ":$PORT .*${PID}/"; then
+                run_status="running (PID $PID, port $PORT)"
+            else
+                run_status="running (PID $PID, but not bound to port $PORT)"
+            fi
+        else
+            run_status="stale pidfile (PID $PID not running)"
+        fi
+    else
+        run_status="not running"
+    fi
+
+    echo "cp_upload: $boot_status (from $boot_source), $run_status"
+}
