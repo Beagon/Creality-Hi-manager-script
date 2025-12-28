@@ -24,6 +24,10 @@ if ! type -p git > /dev/null; then
     opkg install git
 fi
 
+if ! type -p gcc > /dev/null; then
+    opkg install gcc
+fi
+
 progress() {
     echo "#### ${1}"
 }
